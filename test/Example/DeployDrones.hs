@@ -4,12 +4,11 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
-module Example.DeployDrones
-  ( DeployDrones (),
-    withDronesCapability,
-    deployDrones,
-  )
-where
+module Example.DeployDrones (
+  DeployDrones (),
+  withDronesCapability,
+  deployDrones,
+) where
 
 import qualified RestrictedIO as ReIO
 
@@ -26,5 +25,5 @@ withDronesCapability secretKey action
 
 -- Type inference is pretty bad here
 deployDrones :: ReIO.Requiring '[DeployDrones] ()
-deployDrones = ReIO.requiring D $ do
+deployDrones = ReIO.requiringOnly D $ do
   putStrLn "Deploying drones!"

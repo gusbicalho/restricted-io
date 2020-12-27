@@ -17,19 +17,19 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE UndecidableSuperClasses #-}
 
-module RestrictedIO
-  ( RestrictedIO,
-    CanHandle,
-    Requiring,
-    restricted,
-    unrestricted,
-    escalate,
-    handle,
-    requiring,
-    runWith,
-    runWithout,
-  )
-where
+module RestrictedIO (
+  RestrictedIO,
+  CanHandle,
+  Requiring,
+  restricted,
+  unrestricted,
+  escalate,
+  handle,
+  require,
+  requiringOnly,
+  runWith,
+  runWithout,
+) where
 
 import Data.Coerce (coerce)
 import Data.Kind (Type)
@@ -41,8 +41,8 @@ type RestrictedIO :: [Type] -> Type -> Type
 newtype RestrictedIO capabilities a = UnsafeRestrictedIO (IO a)
   deriving newtype (Functor, Applicative, Monad)
 
-restricted :: c -> IO a -> RestrictedIO '[c] a
-restricted !_ = UnsafeRestrictedIO
+restricted :: IO a -> RestrictedIO '[] a
+restricted = UnsafeRestrictedIO
 
 escalate :: c -> RestrictedIO (c : cs) a -> RestrictedIO cs a
 escalate !_ = coerce
@@ -51,8 +51,8 @@ type RequireCapabilities availableCapabilities requiredCapabilities =
   Require
     (availableCapabilities `Contains` requiredCapabilities)
     ( 'Text "Cannot provide required capabilities."
-        ':$$: ('Text "Available capabilities:" ':<>: 'ShowType availableCapabilities)
-        ':$$: ('Text "Required capabilities:" ':<>: 'ShowType requiredCapabilities)
+        ':$$: ( 'Text "Available capabilities:" ':<>: 'ShowType availableCapabilities)
+        ':$$: ( 'Text "Required capabilities:" ':<>: 'ShowType requiredCapabilities)
     )
 
 class
@@ -70,16 +70,17 @@ instance
 unrestricted :: RestrictedIO '[] a -> IO a
 unrestricted (UnsafeRestrictedIO io) = io
 
--- |
--- Version of `handle` with flipped type-parameters, for better UX with
--- TypeApplications. E.g.:
---
--- ```
--- callAndSave = runWith @[HTTP, DbWrite] $ do
---   response <- runWith @[HTTP] getData
---   result <- runWith @[DbWrite] $ saveStuff response
---   pure (response, result)
--- ```
+{- |
+ Version of `handle` with flipped type-parameters, for better UX with
+ TypeApplications. E.g.:
+
+ ```
+ callAndSave = runWith @[HTTP, DbWrite] $ do
+   response <- runWith @[HTTP] getData
+   result <- runWith @[DbWrite] $ saveStuff response
+   pure (response, result)
+ ```
+-}
 runWith ::
   forall (requiredCapabilities :: [Type]) a (availableCapabilities :: [Type]).
   availableCapabilities `CanHandle` requiredCapabilities =>
@@ -99,5 +100,8 @@ type Requiring requiredCapabilities a =
   CanHandle avaliableCapabilities requiredCapabilities =>
   RestrictedIO avaliableCapabilities a
 
-requiring :: requiredCapability -> IO a -> Requiring '[requiredCapability] a
-requiring c = handle . restricted c
+require :: requiredCapability -> RestrictedIO cs a -> RestrictedIO (requiredCapability : cs) a
+require !_ = coerce
+
+requiringOnly :: requiredCapability -> IO a -> Requiring '[requiredCapability] a
+requiringOnly c = handle . require c . restricted

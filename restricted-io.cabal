@@ -50,6 +50,7 @@ library
   import:              common-options
   hs-source-dirs:      src
   exposed-modules:     RestrictedIO
+                       RestrictedIO.Cell
   other-modules:       RestrictedIO.TypeLevel.Set
                        RestrictedIO.TypeLevel.Shenanigans
 

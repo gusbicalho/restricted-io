@@ -1,5 +1,6 @@
 {
   "editor.autoIndent": "keep",
   "editor.detectIndentation": false,
-  "editor.tabSize": 2
+  "editor.tabSize": 2,
+  "haskell.formattingProvider": "fourmolu"
 }
