@@ -1,33 +1,74 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
 
--- |
--- Copyright: (c) 2020 Gustavo Bicalho
--- SPDX-License-Identifier: MIT
--- Maintainer: Gustavo Bicalho <gusbicalho@gmail.com>
---
--- IO monad with capability lists
 module RestrictedIO
   ( RestrictedIO,
     CanHandle,
+    Requiring,
     restricted,
     unrestricted,
-    lift,
-    unlift,
+    escalate,
+    handle,
+    requiring,
     runWith,
     runWithout,
   )
 where
 
+import Data.Coerce (coerce)
 import Data.Kind (Type)
-import RestrictedIO.Core (CanHandle (handle), RestrictedIO, restricted, unrestricted)
-import RestrictedIO.TypeSet qualified as TypeSet
+import GHC.TypeLits (ErrorMessage (ShowType, Text, (:$$:), (:<>:)))
+import RestrictedIO.TypeLevel.Set (Contains, Difference)
+import RestrictedIO.TypeLevel.Shenanigans (Require)
+
+type RestrictedIO :: [Type] -> Type -> Type
+newtype RestrictedIO capabilities a = UnsafeRestrictedIO (IO a)
+  deriving newtype (Functor, Applicative, Monad)
+
+restricted :: c -> IO a -> RestrictedIO '[c] a
+restricted !_ = UnsafeRestrictedIO
+
+escalate :: c -> RestrictedIO (c : cs) a -> RestrictedIO cs a
+escalate !_ = coerce
+
+type RequireCapabilities availableCapabilities requiredCapabilities =
+  Require
+    (availableCapabilities `Contains` requiredCapabilities)
+    ( 'Text "Cannot provide required capabilities."
+        ':$$: ('Text "Available capabilities:" ':<>: 'ShowType availableCapabilities)
+        ':$$: ('Text "Required capabilities:" ':<>: 'ShowType requiredCapabilities)
+    )
+
+class
+  RequireCapabilities availableCapabilities requiredCapabilities =>
+  availableCapabilities `CanHandle` requiredCapabilities
+  where
+  handle :: RestrictedIO requiredCapabilities a -> RestrictedIO availableCapabilities a
+
+instance
+  RequireCapabilities availableCapabilities requiredCapabilities =>
+  availableCapabilities `CanHandle` requiredCapabilities
+  where
+  handle = coerce
+
+unrestricted :: RestrictedIO '[] a -> IO a
+unrestricted (UnsafeRestrictedIO io) = io
 
 -- |
 -- Version of `handle` with flipped type-parameters, for better UX with
@@ -40,29 +81,23 @@ import RestrictedIO.TypeSet qualified as TypeSet
 --   pure (response, result)
 -- ```
 runWith ::
-  forall (cs :: [Type]) a (moreCs :: [Type]).
-  moreCs `CanHandle` cs =>
-  RestrictedIO cs a ->
-  RestrictedIO moreCs a
+  forall (requiredCapabilities :: [Type]) a (availableCapabilities :: [Type]).
+  availableCapabilities `CanHandle` requiredCapabilities =>
+  RestrictedIO requiredCapabilities a ->
+  RestrictedIO availableCapabilities a
 runWith = handle
 
 runWithout ::
-  forall (withoutCs :: [Type]) a (moreCs :: [Type]).
-  (moreCs `CanHandle` (moreCs `TypeSet.Difference` withoutCs)) =>
-  RestrictedIO (moreCs `TypeSet.Difference` withoutCs) a ->
-  RestrictedIO moreCs a
+  forall (forbiddenCapabilities :: [Type]) (availableCapabilities :: [Type]) a.
+  (availableCapabilities `CanHandle` (availableCapabilities `Difference` forbiddenCapabilities)) =>
+  RestrictedIO (availableCapabilities `Difference` forbiddenCapabilities) a ->
+  RestrictedIO availableCapabilities a
 runWithout = handle
 
-lift ::
-  forall (moreCs :: [Type]) (c :: Type) a.
-  moreCs `CanHandle` '[c] =>
-  c ->
-  IO a ->
-  RestrictedIO moreCs a
-lift c = handle . restricted c
+type Requiring requiredCapabilities a =
+  forall avaliableCapabilities.
+  CanHandle avaliableCapabilities requiredCapabilities =>
+  RestrictedIO avaliableCapabilities a
 
-unlift ::
-  forall (capabilities :: [Type]) a.
-  RestrictedIO capabilities a ->
-  IO a
-unlift = unrestricted
+requiring :: requiredCapability -> IO a -> Requiring '[requiredCapability] a
+requiring c = handle . restricted c
